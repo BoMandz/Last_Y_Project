@@ -6,7 +6,6 @@
 #include <windows.h>
 #include <string>
 #include <mutex>
-
 struct State_Overlay {
     // Add mutex for thread safety
     mutable std::mutex dataMutex;
@@ -17,8 +16,10 @@ struct State_Overlay {
     RECT selected;
     std::atomic<bool> isDragging;
     std::string textReturned;
-    int theRetunedINT;
+    DWORD theRetunedINT;
     int thePIDOfProsses;
+    std::string userInput;
+    void* targetFound;
 
     State_Overlay();
     void update(bool visible, bool running, RECT rect, bool dragging, HWND g_h) {
@@ -29,7 +30,27 @@ struct State_Overlay {
         g_hWnd = g_h;
     }
 
-    void updateThePIDOfProsses(const int& var){
+    void updateTargetFound(void* var){
+        std::lock_guard<std::mutex> lock(dataMutex);
+        targetFound = var;
+    }
+
+    void* getTargetFound(){
+        std::lock_guard<std::mutex> lock(dataMutex);
+        return targetFound;
+    }
+
+    void updateUserInput(const std::string& var){
+        std::lock_guard<std::mutex> lock(dataMutex);
+        userInput = var;
+    }
+
+    std::string getUserInput(){
+        std::lock_guard<std::mutex> lock(dataMutex);
+        return userInput;
+    }
+
+    void updateThePIDOfProsses(const DWORD& var){
         std::lock_guard<std::mutex> lock(dataMutex);
         thePIDOfProsses = var;
     }
@@ -39,7 +60,7 @@ struct State_Overlay {
         textReturned = var;
     }
 
-    int getThePIDOfProsses(){
+    DWORD getThePIDOfProsses(){
         std::lock_guard<std::mutex> lock(dataMutex);
         return thePIDOfProsses;
     }
