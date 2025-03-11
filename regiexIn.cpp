@@ -1,5 +1,6 @@
 #include "regiexIn.h"
 #include "shareInfo.h" 
+#include "errorHandler.h"
 //==================//
 #include <regex>
 #include <iostream>
@@ -31,9 +32,9 @@ void regiex_In::ReturnFromRex() {
             int number = std::stoi(output);
             shareInfo.updateTheINT(number);
         } catch (const std::invalid_argument& e) {
-            std::cerr << "Invalid argument: " << e.what() << std::endl;
+            LOG_WARNING("Invalid argument: " + std::string(e.what()));
         } catch (const std::out_of_range& e) {
-            std::cerr << "Out of range: " << e.what() << std::endl;
+            LOG_WARNING("Out of range: " + std::string(e.what()));
         }
     }
 }

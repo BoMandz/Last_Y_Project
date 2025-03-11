@@ -8,7 +8,7 @@ This code is known to cause:
 - Running it may cause compiler errors, depression, or spontaneous combustion.
 - This code is legally classified as a war crime in several countries.
 - If you understand the code, seek medical attention immediately.
-- it doesnt suport upscaling set it to 100% no more no less fuck you
+- it doesnt suport upscaling set it to 100% no more no less
 
 
 ## Features

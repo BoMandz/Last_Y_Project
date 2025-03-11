@@ -1,5 +1,5 @@
 #include "shareInfo.h"
-#include "libs/errorHandler.h"
+#include "errorHandler.h"
 //=================//
 #include <iostream>
 #include <vector>
@@ -21,7 +21,15 @@ std::vector<void*> findValueInProcessMemory(DWORD pid, int targetValue) {
     );
     
     if (processHandle == NULL) {
-        LOG_FATAL("Failed to open process with PID");
+        LOG_INFO("Failed to open process with PID");
+
+        while(true){
+            if (processHandle != NULL){
+                break;
+            }
+            LOG_INFO("Failed to open process with PID");
+            std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        }
         return foundLocations;
     }
     
@@ -177,11 +185,16 @@ void* lastOverlap() {
 
 void runTheValueSearcher(){
     void* val = lastOverlap();
+    std::stringstream ss;
+    
     while(shareInfo.isRunning.load()){
         if (val == nullptr){
             val = lastOverlap();
+            ss << "0x" << std::hex << std::setw(sizeof(void*) * 2) << std::setfill('0') << reinterpret_cast<uintptr_t>(val);
+            std::string ptrStr = ss.str();
+            LOG_INFO("Pointer to mem: " + ptrStr);
         }else{
-            
+
         }
     }
 }

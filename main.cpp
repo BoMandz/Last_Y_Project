@@ -1,6 +1,9 @@
 #include "shareInfo.h"
 #include "screenReader.h"
+#include "processSearcher.h"
 #include "consoleHandler.h"
+#include "errorHandler.h"
+#include "valueSearch.h"
 //=====================//
 #include <windows.h>
 #include <iostream>
@@ -12,7 +15,6 @@
 #include <tesseract/baseapi.h> 
 #include <leptonica/allheaders.h> 
 
-
 //#pragma comment(lib, "Msimg32.lib")
 #undef min
 #undef max
@@ -22,7 +24,7 @@ HINSTANCE g_hInstance;
 HWND g_hWnd;
 std::atomic<bool> isOverlayVisible(false);
 std::atomic<bool> isRunning(true);
-RECT brightRect = { -1, -1, -1, -1 };
+RECT brightRect = { 1, 2, 3, 4 };
 RECT dragRect = { -1, -1, -1, -1 };
 bool isDragging = false;
 POINT startPoint = { -1, -1 };
@@ -74,14 +76,13 @@ LRESULT CALLBACK InputWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
                 std::wstring wideStr(buffer);
                 std::string input(wideStr.begin(), wideStr.end());
                 
-                // Process the input
-                conHandler.The_Output_New_Line("Input received: " + input);
+                // Log the user input
+                LOG_INFO("User submitted input: " + input);
                 
+                shareInfo.updateUserInput(input);
+
                 // Clear the text box
                 SetWindowTextW(g_hTextBox, L"");
-                
-                // Optional: close the window after submission
-                // DestroyWindow(hWnd);
             }
             break;
         }
@@ -104,6 +105,7 @@ LRESULT CALLBACK InputWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
 void CreateInputWindow() {
     // If the window already exists, just show it
     if (g_hInputWnd != NULL) {
+        LOG_INFO("Input window already exists. Showing it.");
         ShowWindow(g_hInputWnd, SW_SHOW);
         SetForegroundWindow(g_hInputWnd);
         return;
@@ -111,11 +113,15 @@ void CreateInputWindow() {
 
     // Register the window class if not already registered
     if (g_wcInput.lpszClassName == NULL) {
+        LOG_INFO("Registering input window class.");
         g_wcInput.lpfnWndProc = InputWndProc;
         g_wcInput.hInstance = g_hInstance;
         g_wcInput.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
         g_wcInput.lpszClassName = L"InputWindowClass";
-        RegisterClassW(&g_wcInput);
+        if (!RegisterClassW(&g_wcInput)) {
+            LOG_ERROR("Failed to register input window class.");
+            return;
+        }
     }
 
     // Calculate position to center the window on screen
@@ -132,8 +138,11 @@ void CreateInputWindow() {
         NULL, NULL, g_hInstance, NULL);
 
     if (g_hInputWnd) {
+        LOG_INFO("Input window created successfully.");
         ShowWindow(g_hInputWnd, SW_SHOW);
         UpdateWindow(g_hInputWnd);
+    } else {
+        LOG_ERROR("Failed to create input window.");
     }
 }
 
@@ -141,6 +150,7 @@ void CreateInputWindow() {
 LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     switch (uMsg) {
         case WM_CREATE:
+            LOG_INFO("Overlay window created.");
             SetWindowPos(g_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOZORDER);
             break;
 
@@ -261,6 +271,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
         }
 
         case WM_DESTROY:
+            LOG_INFO("Overlay window destroyed.");
             isRunning.store(false);
             PostQuitMessage(0);
             break;
@@ -274,9 +285,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
 // Function to toggle the overlay visibility
 static void ToggleOverlay() {
     if (isOverlayVisible) {
+        LOG_INFO("Overlay hidden.");
         ShowWindow(g_hWnd, SW_HIDE);
         isOverlayVisible.store(false);
     } else {
+        LOG_INFO("Overlay shown.");
         ShowWindow(g_hWnd, SW_SHOW);
         UpdateWindow(g_hWnd);
         isOverlayVisible.store(true);
@@ -291,6 +304,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     g_hInstance = hInstance;
 
     std::thread screenReaderThread(screenReaderLoop);
+    std::thread processSearcherThread(SearchForProcessLoop);
+    std::thread valueSearcher(runTheValueSearcher);
 
     WNDCLASSW wc = {};
     wc.lpfnWndProc = WndProc;
@@ -299,7 +314,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     wc.lpszClassName = L"OverlayClass";
 
     if (!RegisterClass(&wc)) {
-        std::cerr << "Failed to register window class." << std::endl;
+        LOG_ERROR("Failed to register window class.");
         return 1;
     }
 
@@ -310,7 +325,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
         nullptr, nullptr, hInstance, nullptr);
 
     if (!g_hWnd) {
-        std::cerr << "Failed to create overlay window." << std::endl;
+        LOG_ERROR("Failed to create overlay window.");
         return 1;
     }
 
@@ -339,14 +354,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
 
         // Ctrl + Alt + S to exit
         if (isKeyPressed(VK_CONTROL) && isKeyPressed(VK_MENU) && isKeyPressed(0x53)) {
-            isRunning = false;
+            LOG_FATAL("Stoped the file whit Ctrl + Alt + S");
             break;
         }
     }
 
+    valueSearcher.join();
+    processSearcherThread.join();
     screenReaderThread.join();
-
-    conHandler.The_Output_New_Line("Ended");
 
     return 0;
 }
