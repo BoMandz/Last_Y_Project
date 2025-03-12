@@ -19,6 +19,7 @@ std::vector<void*> findValueInProcessMemory(DWORD pid, int targetValue) {
         FALSE,
         pid
     );
+    REGISTER_HANDLE(processHandle);
     
     if (processHandle == NULL) {
         LOG_INFO("Failed to open process with PID");
@@ -107,6 +108,7 @@ std::vector<void*> findValueInProcessMemory(DWORD pid, int targetValue) {
     }
     
     // Clean up
+    UNREGISTER_HANDLE(processHandle);
     CloseHandle(processHandle);
     
     return foundLocations;

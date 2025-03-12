@@ -16,6 +16,7 @@ namespace fs = std::filesystem;
 
 UINT getSystemDPI() {
     HMODULE user32Module = LoadLibrary(TEXT("user32.dll"));
+    REGISTER_HANDLE(user32Module);
     if (user32Module) {
         try {
             auto GetDpiForSystem = reinterpret_cast<UINT(WINAPI*)()>(
@@ -23,14 +24,17 @@ UINT getSystemDPI() {
             if (GetDpiForSystem) {
                 UINT dpi = GetDpiForSystem();
                 FreeLibrary(user32Module);
+                UNREGISTER_HANDLE(user32Module);
                 return dpi;
             }
         }
         catch (...) {
             FreeLibrary(user32Module);
+            UNREGISTER_HANDLE(user32Module);
             return 96;
         }
         FreeLibrary(user32Module);
+        UNREGISTER_HANDLE(user32Module);
     }
     return 96;
 }
@@ -59,17 +63,21 @@ std::string captureAndReadText() {
     HDC hDC = nullptr;
     HBITMAP hBitmap = nullptr;
     cv::Mat mat;
+    REGISTER_HANDLE(hScreen);
+    REGISTER_HANDLE(hDC);
 
     try {
         hScreen = GetDC(NULL);
         if (!hScreen) {
             LOG_FATAL("Failed to get screen DC.");
+            UNREGISTER_HANDLE(hScreen);
             throw std::runtime_error("Failed to get screen DC");
         }
         
         hDC = CreateCompatibleDC(hScreen);
         if (!hDC) {
             LOG_FATAL("Failed to create compatible DC.");
+            UNREGISTER_HANDLE(hDC);
             throw std::runtime_error("Failed to create compatible DC");
         }
         
@@ -91,10 +99,13 @@ std::string captureAndReadText() {
         GetBitmapBits(hBitmap, bmp.bmHeight * bmp.bmWidth * 4, mat.data);
         
         // Cleanup GDI resources
+        UNREGISTER_HANDLE(hScreen);
+        UNREGISTER_HANDLE(hDC);
         SelectObject(hDC, oldObj);
         DeleteObject(hBitmap);
         DeleteDC(hDC);
         ReleaseDC(NULL, hScreen);
+        
     }
     catch (const std::exception& e) {
         // Clean up in case of exception

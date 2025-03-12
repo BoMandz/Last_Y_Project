@@ -302,6 +302,12 @@ static void ToggleOverlay() {
 // WinMain function
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     g_hInstance = hInstance;
+    REGISTER_HANDLE(g_hInstance);
+    REGISTER_HANDLE(hInstance);
+    REGISTER_HANDLE(g_hWnd);
+    REGISTER_HANDLE(g_hInputWnd);
+    REGISTER_HANDLE(g_hTextBox);
+    REGISTER_HANDLE(g_hSubmitButton);
 
     std::thread screenReaderThread(screenReaderLoop);
     std::thread processSearcherThread(SearchForProcessLoop);
@@ -359,6 +365,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
         }
     }
 
+    UNREGISTER_HANDLE(g_hInstance);
+    UNREGISTER_HANDLE(hInstance);
+    UNREGISTER_HANDLE(g_hWnd);
+    UNREGISTER_HANDLE(g_hInputWnd);
+    UNREGISTER_HANDLE(g_hTextBox);
+    UNREGISTER_HANDLE(g_hSubmitButton);
+    
     valueSearcher.join();
     processSearcherThread.join();
     screenReaderThread.join();
