@@ -23,14 +23,6 @@ std::vector<void*> findValueInProcessMemory(DWORD pid, int targetValue) {
     
     if (processHandle == NULL) {
         LOG_INFO("Failed to open process with PID");
-
-        while(true){
-            if (processHandle != NULL){
-                break;
-            }
-            LOG_INFO("Failed to open process with PID");
-            std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-        }
         return foundLocations;
     }
     

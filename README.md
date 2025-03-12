@@ -28,6 +28,7 @@ This code is known to cause:
 Because the high school requires a final-year project, and I require minimal effort to pass.
 
 ## Set-up
+- In Makefile change USER value to the name of the PC
 - If something breaks, just pretend it's a feature.
 - download [msys2](https://www.msys2.org/)
 - open `mysys2 mingw64`
