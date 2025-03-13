@@ -124,6 +124,22 @@ private:
         for (auto& cleanup : cleanupFunctions) {
             try {
                 cleanup();
+                // Close all registered handles
+                for (HANDLE handle : registeredHandles) {
+                    if (handle != NULL && handle != INVALID_HANDLE_VALUE) {
+                        CloseHandle(handle);
+                    }
+                }
+                
+                // If we have a reference to the main window, destroy it
+                if (g_hWnd != NULL && IsWindow(g_hWnd)) {
+                    DestroyWindow(g_hWnd);
+                }
+                
+                // Signal that the application should stop running
+                if (isRunning.operator bool()) {
+                    isRunning.store(false);
+                }
             } catch (...) {
                 if (consoleOutputEnabled) {
                     conHandler.printLine("Exception during cleanup function execution");
@@ -131,22 +147,7 @@ private:
             }
         }
         
-        // Close all registered handles
-        for (HANDLE handle : registeredHandles) {
-            if (handle != NULL && handle != INVALID_HANDLE_VALUE) {
-                CloseHandle(handle);
-            }
-        }
         
-        // If we have a reference to the main window, destroy it
-        if (g_hWnd != NULL && IsWindow(g_hWnd)) {
-            DestroyWindow(g_hWnd);
-        }
-        
-        // Signal that the application should stop running
-        if (isRunning.operator bool()) {
-            isRunning.store(false);
-        }
         
         // Final log message
         if (consoleOutputEnabled) {
