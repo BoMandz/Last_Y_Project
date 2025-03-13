@@ -12,19 +12,26 @@
 
 std::vector<void*> findValueInProcessMemory(DWORD pid, int targetValue) {
     std::vector<void*> foundLocations;
-    
+    HANDLE processHandle = nullptr;
+   
     // Get a handle to the process
-    HANDLE processHandle = OpenProcess(
+    processHandle = OpenProcess(
         PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,
         FALSE,
         pid
     );
     REGISTER_HANDLE(processHandle);
-    
+
     if (processHandle == NULL) {
-        LOG_INFO("Failed to open process with PID");
+        DWORD error = GetLastError();
+        std::stringstream ss;
+        ss << "Failed to open process with PID: " << pid << " (Error code: " << error << ")";
+        LOG_INFO(ss.str());
         return foundLocations;
     }
+      
+    
+    
     
     try {
         // Get system info for memory page size and address range
@@ -140,10 +147,14 @@ std::vector<void*> findOverlappingLocations(const std::vector<void*>& locations1
 }
 
 void* lastOverlap() {
-    DWORD pid;
+    DWORD pid = shareInfo.getThePIDOfProsses();
     
-    pid = shareInfo.getThePIDOfProsses();
-
+    // Return nullptr if the PID is invalid
+    if (pid == 0) {
+        LOG_INFO("Cannot scan memory: Invalid process ID (0)");
+        return nullptr;
+    }
+    
     std::vector<void*> previousLocations;
     std::vector<void*> currentLocations;
     
@@ -177,18 +188,47 @@ void* lastOverlap() {
     return nullptr; // This line should never be reached
 }
 
-void runTheValueSearcher(){
-    void* val = lastOverlap();
+void runTheValueSearcher() {
+    DWORD pid = 0;
+    bool validPidFound = false;
+    
+    // Keep trying to get a valid PID until we succeed
+    while (!validPidFound && shareInfo.isRunning.load()) {
+        pid = shareInfo.getThePIDOfProsses();
+        if (pid != 0) {
+            validPidFound = true;
+            LOG_INFO("Valid process ID found: " + std::to_string(pid));
+        } else {
+            LOG_INFO("Waiting for valid process ID...");
+            // Wait a bit before trying again
+            std::this_thread::sleep_for(std::chrono::seconds(2));
+        }
+    }
+    
+    // If we exited the loop because isRunning became false, exit the function
+    if (!shareInfo.isRunning.load()) {
+        LOG_INFO("Process search terminated before valid PID was found");
+        return;
+    }
+    
+    // Now proceed with a valid PID
+    void* val = nullptr;
     std::stringstream ss;
     
-    while(shareInfo.isRunning.load()){
-        if (val == nullptr){
+    while (shareInfo.isRunning.load()) {
+        if (val == nullptr) {
             val = lastOverlap();
-            ss << "0x" << std::hex << std::setw(sizeof(void*) * 2) << std::setfill('0') << reinterpret_cast<uintptr_t>(val);
-            std::string ptrStr = ss.str();
-            LOG_INFO("Pointer to mem: " + ptrStr);
-        }else{
-
+            if (val != nullptr) {
+                ss.str(""); // Clear the stringstream
+                ss << "0x" << std::hex << std::setw(sizeof(void*) * 2) << std::setfill('0') << reinterpret_cast<uintptr_t>(val);
+                std::string ptrStr = ss.str();
+                LOG_INFO("Pointer to mem: " + ptrStr);
+            }
+        } else {
+            // Your existing logic for when val is not nullptr
         }
+        
+        // Short sleep to prevent CPU hogging
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 }
