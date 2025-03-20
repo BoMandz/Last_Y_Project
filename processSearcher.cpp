@@ -8,12 +8,14 @@
 #include <string>
 #include <thread>
 
-DWORD ProcessSearcher(const std::string& name){
+DWORD ProcessSearcher(const std::string& name , bool verbose = false){
     std::wstring w_name(name.begin(),name.end()); 
 
     HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if(hSnapshot == INVALID_HANDLE_VALUE){
-        LOG_ERROR("Failed to get handle for snapshot: " + std::to_string(GetLastError()));
+        if (verbose){
+            LOG_ERROR("Failed to get handle for snapshot: " + std::to_string(GetLastError()));
+        }
         return 0;
     }
     REGISTER_HANDLE(hSnapshot);
@@ -21,7 +23,9 @@ DWORD ProcessSearcher(const std::string& name){
     proc.dwSize = sizeof(PROCESSENTRY32);
 
     if(!Process32First(hSnapshot, &proc)){
-        LOG_ERROR("Failed to get process info: " + std::to_string(GetLastError()));
+        if (verbose){
+            LOG_ERROR("Failed to get process info: " + std::to_string(GetLastError()));
+        }
         CloseHandle(hSnapshot);
         UNREGISTER_HANDLE(hSnapshot);
         return 0;
@@ -43,11 +47,13 @@ DWORD ProcessSearcher(const std::string& name){
 
 
 
-void SearchForProcessLoop(){
+void SearchForProcessLoop(bool verbose = false){
     while (shareInfo.isRunning.load()){
         DWORD processS = ProcessSearcher(shareInfo.getUserInput());
         shareInfo.updateThePIDOfProsses(processS);
-        LOG_INFO(std::to_string(processS));
+        if (verbose){
+            LOG_INFO(std::to_string(processS));
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(1000)); 
     }
 }

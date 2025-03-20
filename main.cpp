@@ -309,9 +309,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     REGISTER_HANDLE(g_hTextBox);
     REGISTER_HANDLE(g_hSubmitButton);
 
-    std::thread screenReaderThread(screenReaderLoop);
-    std::thread processSearcherThread(SearchForProcessLoop);
-    std::thread valueSearcher(runTheValueSearcher);
+    // lamda func is needed cuz normal ones dont work
+    std::thread screenReaderThread([]() { screenReaderLoop(false); });
+    std::thread processSearcherThread([]() { SearchForProcessLoop(false); });
+    std::thread valueSearcher([]() { runTheValueSearcher(false); });
 
     WNDCLASSW wc = {};
     wc.lpfnWndProc = WndProc;

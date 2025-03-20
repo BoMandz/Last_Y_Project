@@ -151,16 +151,20 @@ std::string captureAndReadText() {
     return text;
 }
 
-void screenReaderLoop() {
+void screenReaderLoop(bool verbose = false) {
     while (shareInfo.isRunning.load()) {
         if (!shareInfo.isDragging.load()) {
             std::string text = captureAndReadText();
             if (!text.empty()) {
-                LOG_INFO("Captured text: " + text);
+                if (verbose){
+                    LOG_INFO("Captured text: " + text);
+                }
                 shareInfo.updateTheString(text);
                 regiexIn.ReturnFromRex();
             } else {
-                LOG_INFO("Failed to capture or process text.");
+                if (verbose){
+                    LOG_INFO("Failed to capture or process text.");
+                }
             }
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));

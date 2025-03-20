@@ -2,9 +2,11 @@
 #define SHARE_INFO_H
 
 #include <atomic>
+#include <iostream>
 #include <windows.h>
 #include <string>
 #include <mutex>
+#include <vector>
 struct State_Overlay {
     // Add mutex for thread safety
     mutable std::mutex dataMutex;
@@ -19,6 +21,7 @@ struct State_Overlay {
     int thePIDOfProsses;
     std::string userInput;
     void* targetFound;
+    std::vector<uintptr_t> memoryFoundPointers;
 
     State_Overlay();
     void update(bool visible, bool running, RECT rect, bool dragging, HWND g_h) {
@@ -27,6 +30,11 @@ struct State_Overlay {
         selected = rect;
         isDragging.store(dragging);
         g_hWnd = g_h;
+    }
+
+    void updateMemoryFoundPointers(std::vector<uintptr_t> var){
+        std::lock_guard<std::mutex> lock(dataMutex);
+        memoryFoundPointers = var;
     }
 
     void updateTargetFound(void* var){
@@ -77,6 +85,11 @@ struct State_Overlay {
     void updateTheINT(int a) {
         std::lock_guard<std::mutex> lock(dataMutex);
         theRetunedINT = a;
+    }
+
+    std::vector<uintptr_t> getMemoryFoundPointers(){
+        std::lock_guard<std::mutex> lock(dataMutex);
+        return memoryFoundPointers;
     }
 };
 

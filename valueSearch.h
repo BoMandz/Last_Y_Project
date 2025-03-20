@@ -1,3 +1,3 @@
 #pragma once
 
-void runTheValueSearcher();
+void runTheValueSearcher(bool verbose = true);

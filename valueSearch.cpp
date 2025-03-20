@@ -3,232 +3,176 @@
 //=================//
 #include <iostream>
 #include <vector>
-#include <windows.h>
-#include <psapi.h>
-#include <algorithm>
-#include <unordered_set>
+#include <sstream>
+#include <string>
+#include <cstring>
+#include <stdint.h>
 #include <thread>
-#include <chrono>
+#include <windows.h>
+#include <tlhelp32.h>
+#include <psapi.h>
 
-std::vector<void*> findValueInProcessMemory(DWORD pid, int targetValue) {
-    std::vector<void*> foundLocations;
-    HANDLE processHandle = nullptr;
-   
-    // Get a handle to the process
-    processHandle = OpenProcess(
-        PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,
-        FALSE,
-        pid
-    );
-    REGISTER_HANDLE(processHandle);
 
-    if (processHandle == NULL) {
-        DWORD error = GetLastError();
-        std::stringstream ss;
-        ss << "Failed to open process with PID: " << pid << " (Error code: " << error << ")";
-        LOG_INFO(ss.str());
-        return foundLocations;
+std::vector<uintptr_t> searchMemoryForInt(int pid, int value, bool verbose = true) {
+    std::vector<uintptr_t> results;
+    
+    struct MemoryRegion {
+        uintptr_t start_address;
+        uintptr_t end_address;
+    };
+    std::vector<MemoryRegion> memory_regions;
+    
+    HANDLE process_handle = OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, FALSE, pid);
+    if (process_handle == NULL) {
+        if (verbose) {
+            std::stringstream ss;
+            ss << "Failed to open process. Error code: " << GetLastError();
+            LOG_FATAL(ss.str());
+        }
+        return results;
     }
-      
     
+    MEMORY_BASIC_INFORMATION mbi;
+    LPVOID address = 0;
     
+    while (VirtualQueryEx(process_handle, address, &mbi, sizeof(mbi))) {
+        bool is_readable = (mbi.State == MEM_COMMIT) && 
+                            ((mbi.Protect & PAGE_READONLY) || 
+                            (mbi.Protect & PAGE_READWRITE) || 
+                            (mbi.Protect & PAGE_EXECUTE_READ) || 
+                            (mbi.Protect & PAGE_EXECUTE_READWRITE)) && 
+                            !(mbi.Protect & PAGE_GUARD) && 
+                            !(mbi.Protect & PAGE_NOACCESS);
+            
+        if (is_readable) {
+            MemoryRegion region;
+            region.start_address = reinterpret_cast<uintptr_t>(mbi.BaseAddress);
+            region.end_address = region.start_address + mbi.RegionSize;
+            memory_regions.push_back(region);
+            
+            if (verbose) {
+                std::stringstream ss;
+
+                ss << "Readable region: 0x" << std::hex << region.start_address 
+                          << " - 0x" << region.end_address 
+                          << " Protection: 0x" << mbi.Protect << std::dec;
+                LOG_INFO(ss.str());
+            }
+        }
+        
+        address = (LPVOID)((uintptr_t)mbi.BaseAddress + mbi.RegionSize);
+        
+        if ((uintptr_t)address >= 0x7FFFFFFFFFFFFFFF) {
+            break;
+        }
+    }
     
-    try {
-        // Get system info for memory page size and address range
-        SYSTEM_INFO sysInfo;
-        GetSystemInfo(&sysInfo);
+    if (verbose) {
+        std::cout <<"Found " + std::to_string(memory_regions.size()) + " readable memory regions" <<"\n";
+    }
+    
+    const size_t buffer_size = 4096;
+    int* buffer = new int[buffer_size / sizeof(int)];
+    size_t total_searched = 0;
+    
+    for (const auto& region : memory_regions) {
+        uintptr_t address = region.start_address;
+        size_t region_size = region.end_address - region.start_address;
         
-        // Start at the minimum application address
-        MEMORY_BASIC_INFORMATION memInfo;
-        LPCVOID address = sysInfo.lpMinimumApplicationAddress;
+        if (verbose) {
+            std::stringstream ss;
+            ss << "Searching region 0x" 
+            << std::hex << address 
+            << " - 0x" 
+            << region.end_address 
+            << std::dec 
+            << " (" 
+            << (region_size / 1024) 
+            << " KB)";
+            LOG_INFO(ss.str());
+        }
         
-        // Buffer for reading memory
-        int buffer[4096];
-        
-        // Iterate through memory regions
-        while (address < sysInfo.lpMaximumApplicationAddress) {
-            // Query the memory region
-            if (VirtualQueryEx(processHandle, address, &memInfo, sizeof(memInfo))) {
-                // Check if the memory region is committed, readable, and not guarded or noaccess
-                if ((memInfo.State == MEM_COMMIT) && 
-                    (memInfo.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE)) && 
-                    !(memInfo.Protect & PAGE_GUARD) && 
-                    !(memInfo.Protect & PAGE_NOACCESS)) {
-                    
-                    // Scan the memory region in chunks
-                    SIZE_T bytesRead;
-                    SIZE_T offset = 0;
-                    
-                    while (offset < memInfo.RegionSize) {
-                        SIZE_T bytesToRead = sizeof(buffer);
-                        if (offset + bytesToRead > memInfo.RegionSize) {
-                            bytesToRead = memInfo.RegionSize - offset;
-                        }
-                        
-                        // Only process complete integers
-                        bytesToRead = (bytesToRead / sizeof(int)) * sizeof(int);
-                        if (bytesToRead == 0) break;
-                        
-                        // Read memory chunk
-                        if (ReadProcessMemory(processHandle, 
-                                             (LPCVOID)((uintptr_t)memInfo.BaseAddress + offset), 
-                                             buffer, 
-                                             bytesToRead, 
-                                             &bytesRead)) {
-                            
-                            // Check each int in the buffer
-                            int numInts = bytesRead / sizeof(int);
-                            for (int i = 0; i < numInts; i++) {
-                                if (buffer[i] == targetValue) {
-                                    // Record the address where we found the target value
-                                    void* foundAddress = (void*)((uintptr_t)memInfo.BaseAddress + offset + (i * sizeof(int)));
-                                    foundLocations.push_back(foundAddress);
-                                }
-                            }
-                        }
-                        
-                        // Move to the next chunk
-                        offset += bytesRead;
-                        
-                        // If we couldn't read any bytes, move to the next page
-                        if (bytesRead == 0) break;
+        size_t progress = 0;
+        while (address + sizeof(int) <= region.end_address) {
+            size_t bytes_to_read = buffer_size;
+            
+            if (address + bytes_to_read > region.end_address) {
+                bytes_to_read = region.end_address - address;
+            }
+            
+            bytes_to_read = (bytes_to_read / sizeof(int)) * sizeof(int);
+            
+            if (bytes_to_read < sizeof(int)) {
+                break;
+            }
+            
+            SIZE_T bytes_read;
+            bool read_success = ReadProcessMemory(process_handle, (LPCVOID)address, buffer, bytes_to_read, &bytes_read) && bytes_read == bytes_to_read;
+            
+            if (read_success) {
+                size_t ints_to_check = bytes_to_read / sizeof(int);
+                
+                for (size_t i = 0; i < ints_to_check; i++) {
+                    if (buffer[i] == value) {
+                        results.push_back(address + (i * sizeof(int)));
                     }
                 }
                 
-                // Move to the next memory region
-                address = (LPVOID)((uintptr_t)memInfo.BaseAddress + memInfo.RegionSize);
+                address += bytes_to_read;
+                total_searched += bytes_to_read;
+                
+                if (verbose && (total_searched / (5 * 1024 * 1024)) > progress) {
+                    progress = total_searched / (5 * 1024 * 1024);
+                    std::stringstream ss;
+                    ss << "Searched " << (total_searched / (1024 * 1024)) << " MB...";
+                    LOG_INFO(ss.str());
+                }
             } else {
-                // If VirtualQueryEx fails, move forward by the system page size
-                address = (LPVOID)((uintptr_t)address + sysInfo.dwPageSize);
+                if (verbose) {
+                    std::stringstream ss;
+                    ss << "ReadProcessMemory failed at address 0x" << std::hex << address 
+                    << " Error code: " << GetLastError() << std::dec;
+                    LOG_FATAL(ss.str());
+                }
+                address = (address + 4096) & ~0xFFF;
             }
         }
-    } catch (const std::exception& e) {
-        LOG_FATAL(std::string("Exception occurred: ") + e.what());
     }
     
-    // Clean up
-    UNREGISTER_HANDLE(processHandle);
-    CloseHandle(processHandle);
+    delete[] buffer;
     
-    return foundLocations;
+    CloseHandle(process_handle);
+    
+    if (verbose) {
+        std::stringstream ss;
+        ss << "Search complete. Total memory searched: " << (total_searched / (1024 * 1024)) << " MB";
+        LOG_INFO(ss.str());
+        ss.str("");
+        ss << "Found " << results.size() << " matches";
+        LOG_INFO(ss.str());
+    }
+    
+    return results;
 }
 
-std::vector<void*> findOverlappingLocations(const std::vector<void*>& locations1, const std::vector<void*>& locations2) {
-    std::vector<void*> overlappingLocations;
-    
-    // If either vector is empty, no overlaps are possible
-    if (locations1.empty() || locations2.empty()) {
-        return overlappingLocations;
-    }
-    
-    // For better performance when one vector is much larger than the other,
-    // create a hash set from the smaller vector
-    if (locations1.size() <= locations2.size()) {
-        std::unordered_set<void*> locationSet(locations1.begin(), locations1.end());
-        
-        // Check each location in the second vector against the set
-        for (const auto& location : locations2) {
-            if (locationSet.find(location) != locationSet.end()) {
-                overlappingLocations.push_back(location);
-            }
-        }
-    } else {
-        std::unordered_set<void*> locationSet(locations2.begin(), locations2.end());
-        
-        // Check each location in the first vector against the set
-        for (const auto& location : locations1) {
-            if (locationSet.find(location) != locationSet.end()) {
-                overlappingLocations.push_back(location);
-            }
-        }
-    }
-    
-    return overlappingLocations;
-}
 
-void* lastOverlap() {
-    DWORD pid = shareInfo.getThePIDOfProsses();
-    
-    // Return nullptr if the PID is invalid
-    if (pid == 0) {
-        LOG_INFO("Cannot scan memory: Invalid process ID (0)");
-        return nullptr;
-    }
-    
-    std::vector<void*> previousLocations;
-    std::vector<void*> currentLocations;
-    
-    while (true) {
-        // Find the current locations of the target value in the process memory
-        currentLocations = findValueInProcessMemory(pid, shareInfo.getTheReturnedINT());
-        
-        if (previousLocations.empty()) {
-            // If this is the first scan, just store the current locations
-            previousLocations = currentLocations;
-        } else {
-            // Find overlapping locations between the previous and current scans
-            std::vector<void*> overlappingLocations = findOverlappingLocations(previousLocations, currentLocations);
-            
-            if (overlappingLocations.size() == 1) {
-                // If only one overlapping address remains, return it
-                return overlappingLocations[0];
-            } else if (overlappingLocations.empty()) {
-                // If no overlapping addresses, reset the previous locations
-                previousLocations = currentLocations;
-            } else {
-                // Otherwise, update the previous locations to the overlapping ones
-                previousLocations = overlappingLocations;
-            }
+void runTheValueSearcher(bool verbose = true){
+    while (shareInfo.isRunning)
+    {
+        DWORD pid = 0;
+        int value = NULL;
+        std::vector<uintptr_t> listOfPointers;
+        while (shareInfo.getThePIDOfProsses() == 0){
+            pid = shareInfo.getThePIDOfProsses();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1000)); 
         }
-        
-        // Wait for a short period before scanning again
-        std::this_thread::sleep_for(std::chrono::milliseconds(5000));
-    }
-    
-    return nullptr; // This line should never be reached
-}
-
-void runTheValueSearcher() {
-    DWORD pid = 0;
-    bool validPidFound = false;
-    
-    // Keep trying to get a valid PID until we succeed
-    while (!validPidFound && shareInfo.isRunning.load()) {
-        pid = shareInfo.getThePIDOfProsses();
-        if (pid != 0) {
-            validPidFound = true;
-            LOG_INFO("Valid process ID found: " + std::to_string(pid));
-        } else {
-            LOG_INFO("Waiting for valid process ID...");
-            // Wait a bit before trying again
-            std::this_thread::sleep_for(std::chrono::seconds(2));
+        while (shareInfo.getTheReturnedINT() == NULL){
+            value = shareInfo.getTheReturnedINT();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1000)); 
         }
-    }
-    
-    // If we exited the loop because isRunning became false, exit the function
-    if (!shareInfo.isRunning.load()) {
-        LOG_INFO("Process search terminated before valid PID was found");
-        return;
-    }
-    
-    // Now proceed with a valid PID
-    void* val = nullptr;
-    std::stringstream ss;
-    
-    while (shareInfo.isRunning.load()) {
-        if (val == nullptr) {
-            val = lastOverlap();
-            if (val != nullptr) {
-                ss.str(""); // Clear the stringstream
-                ss << "0x" << std::hex << std::setw(sizeof(void*) * 2) << std::setfill('0') << reinterpret_cast<uintptr_t>(val);
-                std::string ptrStr = ss.str();
-                LOG_INFO("Pointer to mem: " + ptrStr);
-            }
-        } else {
-            // Your existing logic for when val is not nullptr
+        if (pid != 0 && value != NULL){
+            listOfPointers = searchMemoryForInt(pid,value,verbose);
+            shareInfo.updateMemoryFoundPointers(listOfPointers);
         }
-        
-        // Short sleep to prevent CPU hogging
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 }

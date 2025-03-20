@@ -3,4 +3,4 @@
 #include <windows.h>
 #include <string>
 
-void SearchForProcessLoop();
+void SearchForProcessLoop(bool verbose = false);

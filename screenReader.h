@@ -3,4 +3,4 @@
 #include <windows.h>
 #include <string>
 
-void screenReaderLoop();
+void screenReaderLoop(bool verbose = false);
