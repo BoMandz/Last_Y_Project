@@ -1,3 +1,4 @@
+// consoleHandler.h (Partial improvements)
 #ifndef CONSOLEHANDLER_H
 #define CONSOLEHANDLER_H
 
@@ -5,122 +6,39 @@
 #include <mutex>
 #include <windows.h>
 #include <stdexcept>
-#include <sstream>
-#include <iomanip>
-#include <type_traits>
-#include <comutil.h>
+#include <sstream> // Keep for potential fallback string conversion
 
-
-// I dont use ErrorHandler here cuz if this fails ErrorHandler cant write to console
-struct consoleHandler
+class consoleHandler // Use class instead of struct for better encapsulation
 {
     mutable std::mutex dataMutex;
     HANDLE hConsoleInput;
     HANDLE hConsoleOutput;
+    bool consoleAllocated; // Track if we allocated it
 
-    //Gets everything returns it as a string
-    template <typename T>
-    std::string valueToString(const T& value) {
-        if constexpr (std::is_integral_v<T>) {
-            return std::to_string(value);
-        } 
-        else if constexpr (std::is_floating_point_v<T>) {
-            std::ostringstream stream;
-            stream << std::fixed << std::setprecision(6) << value;
-            return stream.str();
-        }
-        else if constexpr (std::is_same_v<T, std::string>) {
-            return value;
-        }
-        else if constexpr (std::is_same_v<T, BOOL>) {
-            return value ? "TRUE" : "FALSE";
-        }
-        else if constexpr (std::is_same_v<T, LPCTSTR>) {
-            return value ? std::string(value) : "NULL";
-        }
-        else {
-            // Fallback for complex types
-            std::ostringstream stream;
-            stream << value;
-            return stream.str();
-        }
-    }
-    
-    consoleHandler() {
-        // Check if the program already has a console
-        if (!GetConsoleWindow()) {
-            // No console attached, allocate a new one
-            if (!AllocConsole()) {
-                throw std::runtime_error("Failed to allocate console");
-            }
-        }
-
-        // Get the handles for the console
-        hConsoleInput = GetStdHandle(STD_INPUT_HANDLE);
-        hConsoleOutput = GetStdHandle(STD_OUTPUT_HANDLE);
-
-        // Check if the handles are valid
-        if (hConsoleInput == INVALID_HANDLE_VALUE || hConsoleOutput == INVALID_HANDLE_VALUE) {
-            FreeConsole(); // Clean up if handles are invalid
-            throw std::runtime_error("Failed to get console handle");
-        }
+    // Simplified error formatting internal to the class
+    std::string formatErrorMessage(const std::string& msg, DWORD errorCode) {
+        std::ostringstream oss;
+        oss << msg << " Error code: " << errorCode;
+        // Optionally add FormatMessage logic here for richer error descriptions
+        return oss.str();
     }
 
-    ~consoleHandler() {
-        // Clean up: Free the console when the object is destroyed
-        if (GetConsoleWindow()) {
-            FreeConsole();
-        }
-    }
+    void writeToConsoleInternal(const std::wstring& value); // Use wstring
+    std::wstring readFromConsoleInternal(); // Use wstring
 
-    void printLine(const std::string& value) {
-        std::lock_guard<std::mutex> lock(dataMutex);
-        WriteConsoleOutput(value);
-        WriteConsoleOutput("\n");
-    }
+public:
+    consoleHandler();
+    ~consoleHandler();
 
-    void print(const std::string& value) {
-        std::lock_guard<std::mutex> lock(dataMutex);
-        WriteConsoleOutput(value);
-    }
+    // Public interface uses std::string for convenience, converts internally
+    void printLine(const std::string& value);
+    void print(const std::string& value);
+    std::string input();
 
-    std::string input() {
-        std::lock_guard<std::mutex> lock(dataMutex);
-        return ReadConsoleInput();
-    }
-
-private:
-    void WriteConsoleOutput(const std::string& value) {
-        DWORD charsWritten;
-        if (!WriteConsoleA(hConsoleOutput, value.c_str(), static_cast<DWORD>(value.size()), &charsWritten, nullptr)) {
-            DWORD error = GetLastError();
-            throw std::runtime_error("Failed to write to console. Error code: " + std::to_string(error));
-        }
-    }
-
-    std::string ReadConsoleInput() {
-        const DWORD bufferSize = 1024;
-        char buffer[bufferSize];
-        DWORD charsRead;
-
-        // Read input from the console
-        if (!ReadConsoleA(hConsoleInput, buffer, bufferSize, &charsRead, nullptr)) {
-            DWORD error = GetLastError();
-            throw std::runtime_error("Failed to read from console. Error code: " + std::to_string(error));
-        }
-
-        // Remove the newline character at the end (if present)
-        if (charsRead >= 2 && buffer[charsRead - 2] == '\r' && buffer[charsRead - 1] == '\n') {
-            charsRead -= 2;
-        } else if (charsRead >= 1 && (buffer[charsRead - 1] == '\r' || buffer[charsRead - 1] == '\n')) {
-            charsRead -= 1;
-        }
-
-        return std::string(buffer, charsRead);
-    }
-
+    // Allow disabling if needed (e.g., if console init fails gracefully)
+    bool isAvailable() const { return hConsoleInput != INVALID_HANDLE_VALUE && hConsoleOutput != INVALID_HANDLE_VALUE; }
 };
 
-extern consoleHandler conHandler;
+extern consoleHandler conHandler; // Keep extern if global is intended
 
-#endif
+#endif // CONSOLEHANDLER_H

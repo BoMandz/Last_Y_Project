@@ -1,5 +1,5 @@
 CC = g++
-CXXFLAGS = -Wall -std=c++20 -DUNICODE -D_UNICODE -lShcore $(shell pkg-config --cflags opencv4 tesseract lept) -I/mingw64/include/tesseract -I/mingw64/include/leptonica
+CXXFLAGS = -Wall -std=c++20 -DUNICODE -D_UNICODE -lShcore $(shell pkg-config --cflags opencv4 tesseract lept) -I/mingw64/include/tesseract -I/mingw64/include/leptonica -D_WIN32_WINNT=0x0601 -DWINVER=0x0601
 LDFLAGS = $(shell pkg-config --libs opencv4 tesseract lept) -L/mingw64/lib -lgdi32 -lmsimg32 -mconsole
 
 SRCS = $(wildcard *.cpp)

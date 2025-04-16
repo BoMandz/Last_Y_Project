@@ -7,6 +7,10 @@
 #include <string>
 #include <mutex>
 #include <vector>
+
+#define WM_APP_REQUEST_WRITE_VALUE (WM_APP + 1)
+#define WM_APP_PERFORM_WRITE (WM_APP + 2)
+
 struct State_Overlay {
     // Add mutex for thread safety
     mutable std::mutex dataMutex;
@@ -22,6 +26,10 @@ struct State_Overlay {
     std::string userInput;
     void* targetFound;
     std::vector<uintptr_t> memoryFoundPointers;
+    std::vector<uintptr_t>  voidPoitersFinaly;
+    std::atomic<bool> writeValueRequestPending = false;
+    std::atomic<bool> writeValueInputReady = false;     
+    std::atomic<int> valueToWrite = 0; 
 
     State_Overlay();
     void update(bool visible, bool running, RECT rect, bool dragging, HWND g_h) {
@@ -30,6 +38,11 @@ struct State_Overlay {
         selected = rect;
         isDragging.store(dragging);
         g_hWnd = g_h;
+    }
+
+    void updateVoidPoitersFinaly(std::vector<uintptr_t> var){
+        std::lock_guard<std::mutex> lock(dataMutex);
+        voidPoitersFinaly = var;
     }
 
     void updateMemoryFoundPointers(std::vector<uintptr_t> var){
@@ -87,10 +100,20 @@ struct State_Overlay {
         theRetunedINT = a;
     }
 
+    std::vector<uintptr_t> getVoidPoitersFinaly(){
+        std::lock_guard<std::mutex> lock(dataMutex);
+        return voidPoitersFinaly;
+    }
+
+
     std::vector<uintptr_t> getMemoryFoundPointers(){
         std::lock_guard<std::mutex> lock(dataMutex);
         return memoryFoundPointers;
     }
+
+    void setValueToWrite(int val) { valueToWrite.store(val); }
+    int getValueToWrite() { return valueToWrite.load(); }
+    
 };
 
 extern State_Overlay shareInfo;
