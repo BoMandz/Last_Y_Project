@@ -152,7 +152,7 @@ std::string captureAndReadText() {
 }
 
 void screenReaderLoop(bool verbose = false) {
-    while (shareInfo.isRunning.load()) {
+    while (true) {
         if (!shareInfo.isDragging.load()) {
             std::string text = captureAndReadText();
             if (!text.empty()) {

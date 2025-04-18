@@ -26,6 +26,7 @@
 //#pragma comment(lib, "Msimg32.lib")
 #undef min
 #undef max
+#define WM_APP_SET_FOCUS_EDIT (WM_APP + 1)
 
 // Global variables
 HINSTANCE g_hInstance;
@@ -48,6 +49,19 @@ WNDCLASSW g_wcInput = {};
 HWND g_hTextBox = NULL;
 HWND g_hSubmitButton = NULL;
 
+HWND g_hIntValueWnd = NULL;        // Handle for the integer-specific input window
+WNDCLASSW g_wcIntValue = {};       // Window class for the integer input window
+#define INT_INPUT_WINDOW_WIDTH 350 // Slightly different size maybe
+#define INT_INPUT_WINDOW_HEIGHT 150
+#define ID_INT_TEXTBOX 201        // New ID for integer text box
+#define ID_INT_SUBMIT_BUTTON 202  // New ID for integer submit button
+HWND g_hIntTextBox = NULL;         // Handle for the integer text box
+HWND g_hIntSubmitButton = NULL;    // Handle for the integer submit button
+
+// Forward declarations for the new functions/procedures
+LRESULT CALLBACK IntValueWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+void CreateIntValueWindow();
+
 void PerformMemoryWrite();
 
 // Function to check if a key is pressed
@@ -56,32 +70,40 @@ static bool isKeyPressed(int key) {
 }
 
 // Input window procedure - defined before it's used
+// Input window procedure - FOR GENERAL INPUT (Ctrl+Alt+X) ONLY
 LRESULT CALLBACK InputWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     switch (uMsg) {
+
+        case WM_APP_SET_FOCUS_EDIT: {
+            if (g_hTextBox) {
+                LOG_INFO("Setting focus to general text box."); // Clarify log
+                SetFocus(g_hTextBox);
+            } else {
+                LOG_WARNING("WM_APP_SET_FOCUS_EDIT received for general input, but g_hTextBox is NULL.");
+            }
+            break;
+        }
+
         case WM_CREATE: {
-            // Create text box
+            // Create text box - NO ES_NUMBER
             g_hTextBox = CreateWindowW(L"EDIT", L"",
-                WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL | ES_NUMBER, // Added ES_NUMBER for integer input
+                WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
                 10, 10, INPUT_WINDOW_WIDTH - 20, 30,
                 hWnd, (HMENU)ID_TEXTBOX, g_hInstance, nullptr);
-            REGISTER_HANDLE(g_hTextBox); // Register handle
+            REGISTER_HANDLE(g_hTextBox);
 
             // Create submit button
             g_hSubmitButton = CreateWindowW(L"BUTTON", L"Submit",
                 WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
                 INPUT_WINDOW_WIDTH / 2 - 40, 50, 80, 30,
                 hWnd, (HMENU)ID_SUBMIT_BUTTON, g_hInstance, nullptr);
-            REGISTER_HANDLE(g_hSubmitButton); // Register handle
+            REGISTER_HANDLE(g_hSubmitButton);
 
-            // Set focus to the text box
-            SetFocus(g_hTextBox);
+            // Set title for general input
+            SetWindowTextW(hWnd, L"Enter Process Name / General Input");
 
-            // Change window title based on why it was opened
-            if (shareInfo.writeValueRequestPending.load()) {
-                SetWindowTextW(hWnd, L"Enter New Value");
-            } else {
-                SetWindowTextW(hWnd, L"Enter Process Name"); // Or generic "Input Window"
-            }
+            // Post message for focus
+            PostMessage(hWnd, WM_APP_SET_FOCUS_EDIT, 0, 0);
             break;
         }
 
@@ -91,58 +113,31 @@ LRESULT CALLBACK InputWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
                 GetWindowTextW(g_hTextBox, buffer, 1024);
                 std::wstring wideStr(buffer);
 
-                // Check if we are in "write value" mode
-                if (shareInfo.writeValueRequestPending.load()) {
-                    try {
-                        int newValue = std::stoi(wideStr); // Convert input to int
-                        LOG_INFO("User submitted new value: " + std::to_string(newValue));
-                        shareInfo.setValueToWrite(newValue);      // Store the value
-                        shareInfo.writeValueInputReady.store(true); // Signal input is ready
-                        shareInfo.writeValueRequestPending.store(false); // Request handled
+                // --- SIMPLIFIED: Always treat as general input ---
+                std::string input(wideStr.begin(), wideStr.end()); // Simple conversion
+                LOG_INFO("General input window submitted: " + input);
+                shareInfo.updateUserInput(input); // Update the shared user input string
 
-                        // --- Option A: Trigger write immediately from UI thread ---
-                        // PostMessage(shareInfo.g_hWnd, WM_APP_PERFORM_WRITE, 0, 0);
-                        // DestroyWindow(hWnd); // Close after submit
+                // Decide what to do after submit: Clear or Close?
+                // SetWindowTextW(g_hTextBox, L""); // Option: Clear the text box
+                DestroyWindow(hWnd);            // Option: Close the window
 
-                        // --- Option B: Let another mechanism poll writeValueInputReady ---
-                        // Just close the window, the writer will pick it up
-                        DestroyWindow(hWnd);
-
-                    } catch (const std::invalid_argument& e) {
-                        MessageBoxW(hWnd, L"Invalid input. Please enter an integer.", L"Input Error", MB_OK | MB_ICONWARNING);
-                        SetFocus(g_hTextBox); // Put focus back
-                    } catch (const std::out_of_range& e) {
-                        MessageBoxW(hWnd, L"Input out of range for an integer.", L"Input Error", MB_OK | MB_ICONWARNING);
-                        SetFocus(g_hTextBox); // Put focus back
-                    }
-                } else {
-                    // Original behavior: Update process name/general input
-                    std::string input(wideStr.begin(), wideStr.end()); // Simple conversion (consider UTF-8 safety)
-                    LOG_INFO("User submitted input: " + input);
-                    shareInfo.updateUserInput(input);
-                    // Clear the text box or close window?
-                    SetWindowTextW(g_hTextBox, L""); // Clear
-                    // DestroyWindow(hWnd); // Optionally close after general submit too
-                }
             }
             break;
         }
 
         case WM_CLOSE:
-            // If the user closes the window while a write was requested, cancel it.
-            if (shareInfo.writeValueRequestPending.load()) {
-                LOG_INFO("User closed input window, cancelling write request.");
-                shareInfo.writeValueRequestPending.store(false);
-                shareInfo.writeValueInputReady.store(false); // Ensure not ready
-            }
+            // General window closed by user
+            LOG_INFO("General input window closed by user.");
             DestroyWindow(hWnd);
             break;
 
         case WM_DESTROY:
-             UNREGISTER_HANDLE(g_hSubmitButton); // Unregister handles
+             LOG_INFO("General input window destroyed.");
+             UNREGISTER_HANDLE(g_hSubmitButton);
              UNREGISTER_HANDLE(g_hTextBox);
-             UNREGISTER_HANDLE(g_hInputWnd); // Unregister window handle itself
-            g_hInputWnd = NULL; // Mark as destroyed
+             UNREGISTER_HANDLE(g_hInputWnd);
+             g_hInputWnd = NULL;
             break;
 
         default:
@@ -150,7 +145,6 @@ LRESULT CALLBACK InputWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
     }
     return 0;
 }
-
 // Function to create the input window
 void CreateInputWindow() {
     // If the window already exists, just show it
@@ -191,6 +185,7 @@ void CreateInputWindow() {
         LOG_INFO("Input window created successfully.");
         ShowWindow(g_hInputWnd, SW_SHOW);
         UpdateWindow(g_hInputWnd);
+        PostMessage(g_hInputWnd, WM_APP_SET_FOCUS_EDIT, 0, 0);
     } else {
         LOG_ERROR("Failed to create input window.");
     }
@@ -216,46 +211,84 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
         case WM_ERASEBKGND:
             return 1;
 
-        case WM_PAINT: {
-            if (isOverlayVisible.load()) {
-                PAINTSTRUCT ps;
-                HDC hdc = BeginPaint(hWnd, &ps);
-
-                // Double buffering
-                HDC memDC = CreateCompatibleDC(hdc);
-                RECT clientRect;
-                GetClientRect(hWnd, &clientRect);
-                HBITMAP memBitmap = CreateCompatibleBitmap(hdc, clientRect.right, clientRect.bottom);
-                SelectObject(memDC, memBitmap);
-
-                // Draw to memory DC
-                HBRUSH hBlackBrush = CreateSolidBrush(RGB(0, 0, 0));
-                FillRect(memDC, &clientRect, hBlackBrush);
-                DeleteObject(hBlackBrush);
-
-                if (brightRect.left >= 0 && brightRect.top >= 0 && brightRect.right >= 0 && brightRect.bottom >= 0) {
-                    HBRUSH hBrightBrush = CreateSolidBrush(RGB(200, 200, 200));
-                    FillRect(memDC, &brightRect, hBrightBrush);
-                    DeleteObject(hBrightBrush);
+            case WM_PAINT: {
+                if (isOverlayVisible.load()) {
+                    PAINTSTRUCT ps;
+                    HDC hdc = BeginPaint(hWnd, &ps);
+            
+                    // Get full client area
+                    RECT clientRect;
+                    GetClientRect(hWnd, &clientRect);
+                    
+                    // Debugging: Log the paint area
+                    LOG_INFO("Painting area: " + 
+                             std::to_string(clientRect.right) + "x" + 
+                             std::to_string(clientRect.bottom));
+            
+                    // Double buffering to prevent flickering
+                    HDC memDC = CreateCompatibleDC(hdc);
+                    HBITMAP memBitmap = CreateCompatibleBitmap(hdc, clientRect.right, clientRect.bottom);
+                    HBITMAP oldBitmap = (HBITMAP)SelectObject(memDC, memBitmap);
+            
+                    // Clear with semi-transparent black background
+                    HBRUSH hBlackBrush = CreateSolidBrush(RGB(0, 0, 0));
+                    FillRect(memDC, &clientRect, hBlackBrush);
+                    DeleteObject(hBlackBrush);
+            
+                    // Draw bright rectangle if active
+                    if (brightRect.left >= 0 && brightRect.top >= 0 && 
+                        brightRect.right >= 0 && brightRect.bottom >= 0) {
+                        HBRUSH hBrightBrush = CreateSolidBrush(RGB(200, 200, 200));
+                        FillRect(memDC, &brightRect, hBrightBrush);
+                        DeleteObject(hBrightBrush);
+            
+                        // Draw border around bright rectangle
+                        HPEN hBorderPen = CreatePen(PS_SOLID, 2, RGB(255, 255, 255));
+                        HPEN hOldPen = (HPEN)SelectObject(memDC, hBorderPen);
+                        MoveToEx(memDC, brightRect.left, brightRect.top, NULL);
+                        LineTo(memDC, brightRect.right, brightRect.top);
+                        LineTo(memDC, brightRect.right, brightRect.bottom);
+                        LineTo(memDC, brightRect.left, brightRect.bottom);
+                        LineTo(memDC, brightRect.left, brightRect.top);
+                        SelectObject(memDC, hOldPen);
+                        DeleteObject(hBorderPen);
+                    }
+            
+                    // Draw drag rectangle if active
+                    if (isDragging) {
+                        HBRUSH hDragBrush = CreateSolidBrush(RGB(100, 100, 255));  // Blue tint for visibility
+                        FillRect(memDC, &dragRect, hDragBrush);
+                        DeleteObject(hDragBrush);
+            
+                        // Draw border around drag rectangle
+                        HPEN hDragPen = CreatePen(PS_DASH, 1, RGB(255, 255, 0));  // Yellow dashed
+                        HPEN hOldPen = (HPEN)SelectObject(memDC, hDragPen);
+                        MoveToEx(memDC, dragRect.left, dragRect.top, NULL);
+                        LineTo(memDC, dragRect.right, dragRect.top);
+                        LineTo(memDC, dragRect.right, dragRect.bottom);
+                        LineTo(memDC, dragRect.left, dragRect.bottom);
+                        LineTo(memDC, dragRect.left, dragRect.top);
+                        SelectObject(memDC, hOldPen);
+                        DeleteObject(hDragPen);
+                    }
+            
+                    // Copy the memory DC to the screen
+                    BitBlt(hdc, 0, 0, clientRect.right, clientRect.bottom, memDC, 0, 0, SRCCOPY);
+            
+                    // Cleanup
+                    SelectObject(memDC, oldBitmap);
+                    DeleteObject(memBitmap);
+                    DeleteDC(memDC);
+            
+                    EndPaint(hWnd, &ps);
+                } else {
+                    // Handle case when overlay is not visible (if needed)
+                    PAINTSTRUCT ps;
+                    BeginPaint(hWnd, &ps);
+                    EndPaint(hWnd, &ps);
                 }
-
-                if (isDragging) {
-                    HBRUSH hDragBrush = CreateSolidBrush(RGB(100, 100, 100));
-                    FillRect(memDC, &dragRect, hDragBrush);
-                    DeleteObject(hDragBrush);
-                }
-
-                // Copy to screen
-                BitBlt(hdc, 0, 0, clientRect.right, clientRect.bottom, memDC, 0, 0, SRCCOPY);
-
-                // Cleanup
-                DeleteObject(memBitmap);
-                DeleteDC(memDC);
-
-                EndPaint(hWnd, &ps);
+                break;
             }
-            break;
-        }
 
         case WM_LBUTTONDOWN: {
             POINT clickPoint = { LOWORD(lParam), HIWORD(lParam) };
@@ -342,7 +375,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
 }
 
 void PerformMemoryWrite() {
-    // Double-check if input is actually ready
     if (!shareInfo.writeValueInputReady.load()) {
         LOG_WARNING("PerformMemoryWrite called, but writeValueInputReady is false.");
         return;
@@ -350,54 +382,204 @@ void PerformMemoryWrite() {
 
     DWORD pid = shareInfo.getThePIDOfProsses();
     std::vector<uintptr_t> addresses = shareInfo.getVoidPoitersFinaly();
-    int newValue = shareInfo.getValueToWrite();
+    int newValue = shareInfo.getValueToWrite(); // Gets the value set by IntValueWndProc
+
+    // Reset the ready flag immediately.
+    shareInfo.writeValueInputReady.store(false);
+
+    LOG_INFO("PerformMemoryWrite triggered with value: " + std::to_string(newValue)); // Added log
 
     if (pid == 0) {
+        // ... (rest of error handling remains the same) ...
         LOG_ERROR("Cannot write value: Target Process ID is 0.");
-        shareInfo.writeValueInputReady.store(false); // Reset flag even on error
+        MessageBoxW(NULL, L"Cannot write value: Target Process ID is 0.", L"Write Error", MB_OK | MB_ICONERROR);
         return;
     }
     if (addresses.empty()) {
+       // ... (rest of error handling remains the same) ...
         LOG_ERROR("Cannot write value: Address list is empty.");
-        shareInfo.writeValueInputReady.store(false); // Reset flag
+         MessageBoxW(NULL, L"Cannot write value: No memory addresses found to write to.", L"Write Error", MB_OK | MB_ICONERROR);
         return;
     }
 
     HANDLE hProcess = OpenProcess(PROCESS_VM_WRITE | PROCESS_VM_OPERATION, FALSE, pid);
-    if (hProcess == NULL) {
-        LOG_ERROR("Failed to open target process with write permissions. Error code: " + std::to_string(GetLastError()));
-        shareInfo.writeValueInputReady.store(false); // Reset flag
+     if (hProcess == NULL) {
+         // ... (rest of error handling remains the same) ...
+        LOG_ERROR("Failed to open target process (PID: " + std::to_string(pid) + ") with write permissions. Error code: " + std::to_string(GetLastError()));
+         MessageBoxW(NULL, (L"Failed to open target process (PID: " + std::to_wstring(pid) + L") with write permissions.\nError code: " + std::to_wstring(GetLastError())).c_str(), L"Write Error", MB_OK | MB_ICONERROR);
         return;
-    }
-     REGISTER_HANDLE(hProcess); // Register for cleanup
+     }
+     REGISTER_HANDLE(hProcess);
 
-    LOG_INFO("Attempting to write value " + std::to_string(newValue) + " to " + std::to_string(addresses.size()) + " address(es)...");
+    // ... (actual writing loop remains the same) ...
+    LOG_INFO("Attempting to write value " + std::to_string(newValue) + " to " + std::to_string(addresses.size()) + " address(es) in PID " + std::to_string(pid) + "...");
     int writeSuccessCount = 0;
     int writeFailCount = 0;
-
     for (uintptr_t addr : addresses) {
         SIZE_T bytesWritten = 0;
         BOOL success = WriteProcessMemory(hProcess, (LPVOID)addr, &newValue, sizeof(newValue), &bytesWritten);
-
         if (success && bytesWritten == sizeof(newValue)) {
-            std::stringstream ss;
-            ss << "Successfully wrote to address 0x" << std::hex << addr;
-            LOG_INFO(ss.str());
+            // ... success logging ...
             writeSuccessCount++;
         } else {
-            std::stringstream ss;
-            ss << "Failed to write to address 0x" << std::hex << addr << ". Error code: " << GetLastError();
-            LOG_ERROR(ss.str());
+            // ... failure logging ...
             writeFailCount++;
         }
     }
     LOG_INFO("Write operation complete. Success: " + std::to_string(writeSuccessCount) + ", Failed: " + std::to_string(writeFailCount));
+    std::wstring summary = L"Memory Write Result:\nValue: " + std::to_wstring(newValue) + L"\nSuccess: " + std::to_wstring(writeSuccessCount) + L"\nFailed: " + std::to_wstring(writeFailCount); // Added value to summary
+    MessageBoxW(NULL, summary.c_str(), L"Write Operation Complete", MB_OK | (writeFailCount > 0 ? MB_ICONWARNING : MB_ICONINFORMATION));
+
 
     CloseHandle(hProcess);
-     UNREGISTER_HANDLE(hProcess); // Unregister after normal close
+     UNREGISTER_HANDLE(hProcess);
+}
 
-    // Reset the flag now that the write is done (or attempted)
-    shareInfo.writeValueInputReady.store(false);
+LRESULT CALLBACK IntValueWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    switch (uMsg) {
+        case WM_CREATE: {
+            // Create integer-only text box
+            g_hIntTextBox = CreateWindowW(L"EDIT", L"",
+                WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL | ES_NUMBER, // Always ES_NUMBER
+                10, 10, INT_INPUT_WINDOW_WIDTH - 20, 30,
+                hWnd, (HMENU)ID_INT_TEXTBOX, g_hInstance, nullptr);
+            REGISTER_HANDLE(g_hIntTextBox);
+
+            // Create submit button
+            g_hIntSubmitButton = CreateWindowW(L"BUTTON", L"Write Value", // Specific button text
+                WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                INT_INPUT_WINDOW_WIDTH / 2 - 50, 50, 100, 30, // Centered
+                hWnd, (HMENU)ID_INT_SUBMIT_BUTTON, g_hInstance, nullptr);
+            REGISTER_HANDLE(g_hIntSubmitButton);
+
+            SetWindowTextW(hWnd, L"Enter Integer Value to Write"); // Specific title
+
+            // Post message to set focus reliably
+            PostMessage(hWnd, WM_APP_SET_FOCUS_EDIT, 0, 0);
+            break;
+        }
+
+        // Handle the custom focus message (shared with the other input window is fine)
+        case WM_APP_SET_FOCUS_EDIT: {
+             if (g_hIntTextBox) { // Check the correct text box handle
+                 LOG_INFO("Setting focus to integer text box.");
+                 SetFocus(g_hIntTextBox);
+             } else {
+                 LOG_WARNING("WM_APP_SET_FOCUS_EDIT received for IntValueWnd, but g_hIntTextBox is NULL.");
+             }
+             break;
+        }
+
+        case WM_COMMAND: {
+            if (LOWORD(wParam) == ID_SUBMIT_BUTTON) {
+                wchar_t buffer[1024];
+                GetWindowTextW(g_hTextBox, buffer, 1024);
+                std::wstring wideStr(buffer);
+
+                // Check if we are in "write value" mode << --- PROBLEM AREA ---
+                if (shareInfo.writeValueRequestPending.load()) { // <<< THIS IS THE ISSUE
+                    try {
+                        // It *tries* to convert to an integer because the flag might be true
+                        int newValue = std::stoi(wideStr);
+                        LOG_INFO("User submitted new value: " + std::to_string(newValue));
+                        shareInfo.setValueToWrite(newValue);
+                        shareInfo.writeValueInputReady.store(true);
+                        shareInfo.writeValueRequestPending.store(false);
+                        DestroyWindow(hWnd);
+
+                    } catch (const std::invalid_argument& e) {
+                        // If you type non-integers, it fails here and shows the integer error!
+                        MessageBoxW(hWnd, L"Invalid input. Please enter an integer.", L"Input Error", MB_OK | MB_ICONWARNING);
+                        SetFocus(g_hTextBox); // Put focus back
+                    } catch (const std::out_of_range& e) {
+                        MessageBoxW(hWnd, L"Input out of range for an integer.", L"Input Error", MB_OK | MB_ICONWARNING);
+                        SetFocus(g_hTextBox); // Put focus back
+                    }
+                } else {
+                    // This 'else' block is intended for Ctrl+Alt+X, but might not be reached
+                    // if writeValueRequestPending is incorrectly true.
+                    std::string input(wideStr.begin(), wideStr.end());
+                    LOG_INFO("User submitted input: " + input);
+                    shareInfo.updateUserInput(input);
+                    SetWindowTextW(g_hTextBox, L""); // Clear
+                    // DestroyWindow(hWnd); // Optionally close
+                }
+            }
+            break;
+        }
+
+        case WM_CLOSE:
+             // User closed the window, simply destroy it. The write won't happen.
+             LOG_INFO("Integer input window closed by user.");
+             shareInfo.writeValueInputReady.store(false); // Ensure flag is false if closed prematurely
+            DestroyWindow(hWnd);
+            break;
+
+        case WM_DESTROY:
+            LOG_INFO("Integer input window destroyed.");
+            UNREGISTER_HANDLE(g_hIntSubmitButton);
+            UNREGISTER_HANDLE(g_hIntTextBox);
+            UNREGISTER_HANDLE(g_hIntValueWnd); // Unregister window handle itself
+            g_hIntValueWnd = NULL; // Mark as destroyed
+            break;
+
+        default:
+            return DefWindowProc(hWnd, uMsg, wParam, lParam);
+    }
+    return 0;
+}
+
+void CreateIntValueWindow() {
+    // If the window already exists, just show it and bring it to front
+    if (g_hIntValueWnd != NULL) {
+        LOG_INFO("Integer input window already exists. Showing and activating it.");
+        ShowWindow(g_hIntValueWnd, SW_RESTORE);
+        SetForegroundWindow(g_hIntValueWnd);
+        // Re-post focus message just in case
+        PostMessage(g_hIntValueWnd, WM_APP_SET_FOCUS_EDIT, 0, 0);
+        return;
+    }
+
+    // Register the window class if not already registered
+    if (g_wcIntValue.lpszClassName == NULL) {
+        LOG_INFO("Registering integer input window class.");
+        g_wcIntValue.lpfnWndProc = IntValueWndProc; // Use the new procedure
+        g_wcIntValue.hInstance = g_hInstance;
+        g_wcIntValue.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+        g_wcIntValue.lpszClassName = L"IntValueWindowClass"; // New class name
+        if (!RegisterClassW(&g_wcIntValue)) {
+            LOG_ERROR("Failed to register integer input window class.");
+            return;
+        }
+    }
+
+    // Calculate position to center the window on screen
+    int screenWidth = GetSystemMetrics(SM_CXSCREEN);
+    int screenHeight = GetSystemMetrics(SM_CYSCREEN);
+    int x = (screenWidth - INT_INPUT_WINDOW_WIDTH) / 2;
+    int y = (screenHeight - INT_INPUT_WINDOW_HEIGHT) / 2;
+
+    // Create the window
+    g_hIntValueWnd = CreateWindowExW(
+        WS_EX_TOPMOST,
+        L"IntValueWindowClass", // Use the new class name
+        L"Enter Integer Value", // Initial Title (can be set again in WM_CREATE)
+        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+        x, y, INT_INPUT_WINDOW_WIDTH, INT_INPUT_WINDOW_HEIGHT,
+        NULL, NULL, g_hInstance, NULL);
+    REGISTER_HANDLE(g_hIntValueWnd); // Register handle right after creation
+
+    if (g_hIntValueWnd) {
+        LOG_INFO("Integer input window created successfully.");
+        ShowWindow(g_hIntValueWnd, SW_SHOW);
+        UpdateWindow(g_hIntValueWnd);
+        SetForegroundWindow(g_hIntValueWnd); // Bring the window to the front
+        // Focus is handled via PostMessage from WM_CREATE
+    } else {
+        DWORD error = GetLastError();
+        LOG_ERROR("Failed to create integer input window. Error code: " + std::to_string(error));
+         UNREGISTER_HANDLE(g_hIntValueWnd); // Unregister if creation failed
+    }
 }
 
 // Function to toggle the overlay visibility
@@ -408,100 +590,110 @@ static void ToggleOverlay() {
         isOverlayVisible.store(false);
     } else {
         LOG_INFO("Overlay shown.");
-        ShowWindow(g_hWnd, SW_SHOW);
+        
+        // Get screen dimensions
+        int screenWidth = GetSystemMetrics(SM_CXSCREEN);
+        int screenHeight = GetSystemMetrics(SM_CYSCREEN);
+        
+        // Ensure fullscreen coverage
+        SetWindowPos(g_hWnd, HWND_TOPMOST, 
+                    0, 0,                      // Position at top-left
+                    screenWidth, screenHeight,  // Full screen size
+                    SWP_SHOWWINDOW | SWP_NOACTIVATE);
+        
+        // Force redraw
+        InvalidateRect(g_hWnd, NULL, TRUE);
         UpdateWindow(g_hWnd);
+        
         isOverlayVisible.store(true);
     }
-
-    // Update shareInfo
     shareInfo.update(isOverlayVisible.load(), isRunning.load(), brightRect, isDragging, g_hWnd);
 }
-
-// WinMain function
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
     g_hInstance = hInstance;
     REGISTER_HANDLE(g_hInstance);
-    REGISTER_HANDLE(hInstance);
-    REGISTER_HANDLE(g_hWnd);
-    REGISTER_HANDLE(g_hInputWnd);
-    REGISTER_HANDLE(g_hTextBox);
-    REGISTER_HANDLE(g_hSubmitButton);
 
-    // lamda func is needed cuz normal ones dont work
+    // Start threads
     std::thread screenReaderThread([]() { screenReaderLoop(true); });
     std::thread processSearcherThread([]() { SearchForProcessLoop(true); });
 
+    // Register window class
     WNDCLASSW wc = {};
     wc.lpfnWndProc = WndProc;
     wc.hInstance = hInstance;
-    wc.hbrBackground = NULL; 
     wc.lpszClassName = L"OverlayClass";
-
-    if (!RegisterClass(&wc)) {
-        LOG_ERROR("Failed to register window class.");
+    
+    if (!RegisterClassW(&wc)) {
+        LOG_ERROR("Failed to register window class");
         return 1;
     }
 
+    // Create window with proper styles
     g_hWnd = CreateWindowExW(
-        WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED,
-        L"OverlayClass", L"Overlay",
-        WS_POPUP, 0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN),
-        nullptr, nullptr, hInstance, nullptr);
+        WS_EX_TOPMOST | WS_EX_LAYERED,
+        L"OverlayClass", 
+        L"Overlay",
+        WS_POPUP,
+        0, 0, 
+        GetSystemMetrics(SM_CXSCREEN), 
+        GetSystemMetrics(SM_CYSCREEN),
+        nullptr, 
+        nullptr, 
+        hInstance, 
+        nullptr);
 
     if (!g_hWnd) {
-        LOG_ERROR("Failed to create overlay window.");
+        LOG_ERROR("Failed to create window");
         return 1;
     }
 
-    SetLayeredWindowAttributes(g_hWnd, RGB(0, 0, 0), 100, LWA_ALPHA);
+    // Set transparency properties
+    SetLayeredWindowAttributes(g_hWnd, RGB(0, 0, 0), 128, LWA_ALPHA);
 
-    // Main loop
+    // Show the window immediately at startup
+    isOverlayVisible.store(true);
+    ShowWindow(g_hWnd, SW_SHOW);
+    UpdateWindow(g_hWnd);
+
+    // Force initial paint
+    InvalidateRect(g_hWnd, NULL, TRUE);
+    UpdateWindow(g_hWnd);
+
+    // Main message loop
     MSG msg = {};
-    
     while (isRunning.load()) {
-        if (shareInfo.writeValueInputReady.load()) {
-            PerformMemoryWrite();
-        }
-
-       if (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
+        if (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
             if (msg.message == WM_QUIT) {
                 isRunning.store(false);
                 break;
             }
             TranslateMessage(&msg);
             DispatchMessage(&msg);
-        }
-        else {
-            // No messages, check hotkeys and idle
+        } else {
+            // Hotkey handling
             if (isKeyPressed(VK_CONTROL) && isKeyPressed(VK_MENU) && isKeyPressed(0x41)) { // Ctrl+Alt+A
                 ToggleOverlay();
                 Sleep(300); // Debounce
-            } else if (isKeyPressed(VK_CONTROL) && isKeyPressed(VK_MENU) && isKeyPressed(0x58)) { // Ctrl+Alt+X
+            }
+            else if (isKeyPressed(VK_CONTROL) && isKeyPressed(VK_MENU) && isKeyPressed(0x58)) { // Ctrl+Alt+X
                 // --> Add flag clearing here <--
                 shareInfo.writeValueRequestPending.store(false);
                 shareInfo.writeValueInputReady.store(false);
                 CreateInputWindow();
                 Sleep(300); // Debounce
             } else if (isKeyPressed(VK_CONTROL) && isKeyPressed(VK_MENU) && isKeyPressed(0x53)) { // Ctrl+Alt+S
-                LOG_INFO("Exit requested via hotkey (Ctrl+Alt+S)."); // Use INFO or FATAL consistently
+                LOG_FATAL("Exit requested via hotkey (Ctrl+Alt+S)."); // Use INFO or FATAL consistently
                 isRunning.store(false);
                 break;
-            } else {
-                // --> Wait briefly if nothing else happened <--
-                MsgWaitForMultipleObjectsEx(0, NULL, 10, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
             }
+            // Brief sleep to prevent CPU overuse
+            Sleep(10);
         }
     }
 
-    UNREGISTER_HANDLE(g_hInstance);
-    UNREGISTER_HANDLE(hInstance);
-    UNREGISTER_HANDLE(g_hWnd);
-    UNREGISTER_HANDLE(g_hInputWnd);
-    UNREGISTER_HANDLE(g_hTextBox);
-    UNREGISTER_HANDLE(g_hSubmitButton);
-    
+    // Cleanup
     processSearcherThread.join();
     screenReaderThread.join();
-
+    
     return 0;
 }
