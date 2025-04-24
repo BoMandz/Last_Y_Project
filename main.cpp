@@ -49,14 +49,15 @@ WNDCLASSW g_wcInput = {};
 HWND g_hTextBox = NULL;
 HWND g_hSubmitButton = NULL;
 
-HWND g_hIntValueWnd = NULL;        // Handle for the integer-specific input window
-WNDCLASSW g_wcIntValue = {};       // Window class for the integer input window
-#define INT_INPUT_WINDOW_WIDTH 350 // Slightly different size maybe
+// Input window for value swich globals
+HWND g_hIntValueWnd = NULL;        
+WNDCLASSW g_wcIntValue = {};       
+#define INT_INPUT_WINDOW_WIDTH 350 
 #define INT_INPUT_WINDOW_HEIGHT 150
-#define ID_INT_TEXTBOX 201        // New ID for integer text box
-#define ID_INT_SUBMIT_BUTTON 202  // New ID for integer submit button
-HWND g_hIntTextBox = NULL;         // Handle for the integer text box
-HWND g_hIntSubmitButton = NULL;    // Handle for the integer submit button
+#define ID_INT_TEXTBOX 201        
+#define ID_INT_SUBMIT_BUTTON 202  
+HWND g_hIntTextBox = NULL;         
+HWND g_hIntSubmitButton = NULL;    
 
 // Forward declarations for the new functions/procedures
 LRESULT CALLBACK IntValueWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
@@ -69,14 +70,12 @@ static bool isKeyPressed(int key) {
     return GetAsyncKeyState(key) & 0x8000;
 }
 
-// Input window procedure - defined before it's used
-// Input window procedure - FOR GENERAL INPUT (Ctrl+Alt+X) ONLY
 LRESULT CALLBACK InputWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     switch (uMsg) {
 
         case WM_APP_SET_FOCUS_EDIT: {
             if (g_hTextBox) {
-                LOG_INFO("Setting focus to general text box."); // Clarify log
+                LOG_INFO("Setting focus to general text box."); 
                 SetFocus(g_hTextBox);
             } else {
                 LOG_WARNING("WM_APP_SET_FOCUS_EDIT received for general input, but g_hTextBox is NULL.");
@@ -85,24 +84,22 @@ LRESULT CALLBACK InputWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
         }
 
         case WM_CREATE: {
-            // Create text box - NO ES_NUMBER
+            
             g_hTextBox = CreateWindowW(L"EDIT", L"",
                 WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
                 10, 10, INPUT_WINDOW_WIDTH - 20, 30,
                 hWnd, (HMENU)ID_TEXTBOX, g_hInstance, nullptr);
             REGISTER_HANDLE(g_hTextBox);
 
-            // Create submit button
+            
             g_hSubmitButton = CreateWindowW(L"BUTTON", L"Submit",
                 WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
                 INPUT_WINDOW_WIDTH / 2 - 40, 50, 80, 30,
                 hWnd, (HMENU)ID_SUBMIT_BUTTON, g_hInstance, nullptr);
             REGISTER_HANDLE(g_hSubmitButton);
 
-            // Set title for general input
             SetWindowTextW(hWnd, L"Enter Process Name / General Input");
 
-            // Post message for focus
             PostMessage(hWnd, WM_APP_SET_FOCUS_EDIT, 0, 0);
             break;
         }
@@ -113,14 +110,11 @@ LRESULT CALLBACK InputWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
                 GetWindowTextW(g_hTextBox, buffer, 1024);
                 std::wstring wideStr(buffer);
 
-                // --- SIMPLIFIED: Always treat as general input ---
-                std::string input(wideStr.begin(), wideStr.end()); // Simple conversion
+                std::string input(wideStr.begin(), wideStr.end()); 
                 LOG_INFO("General input window submitted: " + input);
-                shareInfo.updateUserInput(input); // Update the shared user input string
+                shareInfo.updateUserInput(input);
 
-                // Decide what to do after submit: Clear or Close?
-                // SetWindowTextW(g_hTextBox, L""); // Option: Clear the text box
-                DestroyWindow(hWnd);            // Option: Close the window
+                DestroyWindow(hWnd);            
 
             }
             break;
@@ -415,6 +409,7 @@ void PerformMemoryWrite() {
     LOG_INFO("Attempting to write value " + std::to_string(newValue) + " to " + std::to_string(addresses.size()) + " address(es) in PID " + std::to_string(pid) + "...");
     int writeSuccessCount = 0;
     int writeFailCount = 0;
+
     for (uintptr_t addr : addresses) {
         SIZE_T bytesWritten = 0;
         BOOL success = WriteProcessMemory(hProcess, (LPVOID)addr, &newValue, sizeof(newValue), &bytesWritten);
@@ -426,19 +421,20 @@ void PerformMemoryWrite() {
             writeFailCount++;
         }
     }
+
     LOG_INFO("Write operation complete. Success: " + std::to_string(writeSuccessCount) + ", Failed: " + std::to_string(writeFailCount));
     std::wstring summary = L"Memory Write Result:\nValue: " + std::to_wstring(newValue) + L"\nSuccess: " + std::to_wstring(writeSuccessCount) + L"\nFailed: " + std::to_wstring(writeFailCount); // Added value to summary
     MessageBoxW(NULL, summary.c_str(), L"Write Operation Complete", MB_OK | (writeFailCount > 0 ? MB_ICONWARNING : MB_ICONINFORMATION));
 
 
     CloseHandle(hProcess);
-     UNREGISTER_HANDLE(hProcess);
+    UNREGISTER_HANDLE(hProcess);
 }
 
 LRESULT CALLBACK IntValueWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     switch (uMsg) {
         case WM_CREATE: {
-            // Create integer-only text box
+            
             g_hIntTextBox = CreateWindowW(L"EDIT", L"",
                 WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL | ES_NUMBER, // Always ES_NUMBER
                 10, 10, INT_INPUT_WINDOW_WIDTH - 20, 30,

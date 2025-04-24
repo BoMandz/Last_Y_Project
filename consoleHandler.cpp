@@ -1,17 +1,14 @@
-// consoleHandler.cpp (Conceptual changes)
 #include "consoleHandler.h"
-#include <vector> // For ReadConsoleW buffer
-#include <locale> // For conversions
-#include <codecvt> // For conversions
+//======================//
+#include <vector> 
+#include <locale> 
+#include <codecvt> 
 
 consoleHandler::consoleHandler() : hConsoleInput(INVALID_HANDLE_VALUE), hConsoleOutput(INVALID_HANDLE_VALUE), consoleAllocated(false) {
-    // Check if the program already has a console
     if (!GetConsoleWindow()) {
-        // No console attached, allocate a new one
         if (!AllocConsole()) {
-            // Non-fatal: Maybe log to DebugOutputString? Don't throw.
              OutputDebugStringA("Failed to allocate console.\n");
-             return; // Leave handles invalid
+             return; 
         }
         consoleAllocated = true;
     }
@@ -29,9 +26,9 @@ consoleHandler::consoleHandler() : hConsoleInput(INVALID_HANDLE_VALUE), hConsole
         hConsoleInput = INVALID_HANDLE_VALUE;
         hConsoleOutput = INVALID_HANDLE_VALUE;
     } else {
-        // Set console output to UTF-8? Optional but often helpful.
-        // SetConsoleOutputCP(CP_UTF8);
-        // SetConsoleCP(CP_UTF8);
+        // Set console output to UTF-8
+        SetConsoleOutputCP(CP_UTF8);
+        SetConsoleCP(CP_UTF8);
     }
 }
 
@@ -40,13 +37,10 @@ consoleHandler::~consoleHandler() {
     if (consoleAllocated && GetConsoleWindow()) {
         FreeConsole();
     }
-    // Handles are closed automatically by OS if obtained via GetStdHandle
 }
 
 // Helper for string conversion (simplistic)
 std::wstring string_to_wstring(const std::string& str) {
-    // Note: This basic conversion works for ASCII/UTF-8 subset, but proper
-    // conversion might need MultiByteToWideChar with CP_UTF8 if input isn't guaranteed ASCII
     return std::wstring(str.begin(), str.end());
 }
 

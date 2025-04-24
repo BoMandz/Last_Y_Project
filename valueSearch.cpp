@@ -1,5 +1,4 @@
-// valueSearch.cpp
-#include "valueSearch.h" // Include the header
+#include "valueSearch.h" 
 #include "shareInfo.h"
 #include "errorHandler.h"
 //=================//
@@ -7,58 +6,43 @@
 #include <vector>
 #include <sstream>
 #include <string>
-#include <cstring> // For memcpy or direct read
+#include <cstring> 
 #include <stdint.h>
 #include <windows.h>
 #include <tlhelp32.h>
 #include <psapi.h>
-#include <algorithm> // For std::min if needed
+#include <algorithm> 
 
-// --- searchMemoryForInt implementation remains largely the same ---
-// Make sure the pid parameter is DWORD and remove the default arg value here
 std::vector<uintptr_t> searchMemoryForInt(DWORD pid, int value, bool verbose) {
     std::vector<uintptr_t> results;
-    // ... (rest of the existing searchMemoryForInt implementation)
-    // Ensure OpenProcess uses pid (DWORD)
-    // Ensure logging uses pid correctly
-    // Remember to REGISTER_HANDLE/UNREGISTER_HANDLE for process_handle
-    // Return results
-     // ... (Paste the full implementation from previous answers, ensuring pid is DWORD) ...
-     // Example snippet start:
      struct MemoryRegion {
         uintptr_t start_address;
         uintptr_t end_address;
     };
     std::vector<MemoryRegion> memory_regions;
 
-    // Use PROCESS_VM_READ only, unless write is needed elsewhere (unlikely for search)
     HANDLE process_handle = OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, FALSE, pid);
-    // REGISTER_HANDLE(process_handle); // Register handle - DO IT *AFTER* checking for NULL
-
     if (process_handle == NULL) {
         if (verbose) {
             std::stringstream ss;
             ss << "Failed to open process " << pid << " for initial scan. Error code: " << GetLastError();
             LOG_ERROR(ss.str());
         }
-        return results; // Return empty list
+        return results; 
     }
-    REGISTER_HANDLE(process_handle); // Register *after* successful open
+    REGISTER_HANDLE(process_handle); 
 
     MEMORY_BASIC_INFORMATION mbi;
     LPVOID address = 0;
 
-    // --- VirtualQueryEx loop ---
-    // ... (same loop as before to find readable regions) ...
      while (VirtualQueryEx(process_handle, address, &mbi, sizeof(mbi))) {
-            // Check if readable (consider adding PAGE_WRITECOPY as well)
             bool is_readable = (mbi.State == MEM_COMMIT) &&
                            ((mbi.Protect & PAGE_READONLY) ||
                             (mbi.Protect & PAGE_READWRITE) ||
-                            (mbi.Protect & PAGE_WRITECOPY) || // Added WriteCopy
+                            (mbi.Protect & PAGE_WRITECOPY) || 
                             (mbi.Protect & PAGE_EXECUTE_READ) ||
                             (mbi.Protect & PAGE_EXECUTE_READWRITE) ||
-                            (mbi.Protect & PAGE_EXECUTE_WRITECOPY)) && // Added Execute WriteCopy
+                            (mbi.Protect & PAGE_EXECUTE_WRITECOPY)) && 
                            !(mbi.Protect & PAGE_GUARD) &&
                            !(mbi.Protect & PAGE_NOACCESS);
 
@@ -69,17 +53,14 @@ std::vector<uintptr_t> searchMemoryForInt(DWORD pid, int value, bool verbose) {
                 memory_regions.push_back(region);
             }
             address = (LPVOID)((uintptr_t)mbi.BaseAddress + mbi.RegionSize);
-            if ((uintptr_t)address >= (uintptr_t)-1) { // Check for wrap-around or max address
+            if ((uintptr_t)address >= (uintptr_t)-1) { 
                  break;
              }
      }
 
-    // --- Buffer and search loop ---
-    // ... (same buffer logic and reading loop as before) ...
-     const size_t buffer_size = 65536; // Larger buffer can be faster
-     std::vector<char> buffer(buffer_size); // Use vector for automatic memory management
+     const size_t buffer_size = 65536; 
+     std::vector<char> buffer(buffer_size); 
      size_t total_searched = 0;
-     // ... loop through memory_regions ...
      for (const auto& region : memory_regions) {
          uintptr_t current_address = region.start_address;
          size_t remaining_in_region = region.end_address - current_address;
@@ -99,7 +80,6 @@ std::vector<uintptr_t> searchMemoryForInt(DWORD pid, int value, bool verbose) {
                  remaining_in_region -= bytes_read;
                  total_searched += bytes_read;
              } else {
-                  // Handle read failure - log and break inner loop for this region
                  if (verbose && !read_success) { /* log error */ }
                  break;
              }
@@ -108,7 +88,7 @@ std::vector<uintptr_t> searchMemoryForInt(DWORD pid, int value, bool verbose) {
 
 
     CloseHandle(process_handle);
-    UNREGISTER_HANDLE(process_handle); // Unregister handle
+    UNREGISTER_HANDLE(process_handle); 
 
     if (verbose) {
         std::stringstream ss;
@@ -116,66 +96,66 @@ std::vector<uintptr_t> searchMemoryForInt(DWORD pid, int value, bool verbose) {
         LOG_INFO(ss.str());
     }
     return results;
-     // Example snippet end.
 }
 
-
-// *** NEW: Refine function implementation ***
-// Remove the default argument value here
 std::vector<uintptr_t> refineCandidates(DWORD pid, const std::vector<uintptr_t>& candidates, int newValue, bool verbose) {
     std::vector<uintptr_t> refinedList;
+
     if (candidates.empty()) {
-        // ... (empty check logic) ...
+        if (verbose) {
+            std::cout << "[Refine] No candidates to refine." << std::endl;
+        }
         return refinedList;
     }
 
     HANDLE process_handle = OpenProcess(PROCESS_VM_READ, FALSE, pid);
-    // ... (handle checking and registration logic) ...
-     if (process_handle == NULL) {
-        // ... (error handling) ...
+    if (process_handle == NULL) {
+        if (verbose) {
+            std::cerr << "[Refine] Failed to open process " << pid << ". Error: " << GetLastError() << std::endl;
+        }
         return refinedList;
-     }
-     REGISTER_HANDLE(process_handle);
-
-    if (verbose) {
-        // ... (logging) ...
     }
+    REGISTER_HANDLE(process_handle);
 
-    int currentValue = 0; // Variable to hold the value read from memory
+    int currentValue = 0;
     SIZE_T bytesRead = 0;
     int keptCount = 0;
-    LPVOID tValue;
 
     for (uintptr_t addr : candidates) {
-        bytesRead = 0; // Reset for each read attempt
+        bytesRead = 0;
         BOOL success = ReadProcessMemory(
             process_handle,
             (LPCVOID)addr,
-            tValue,       // Buffer to store the read value <<< CORRECTION: Uses currentValue
-            sizeof(currentValue), // Number of bytes to read
+            &currentValue,         
+            sizeof(currentValue),
             &bytesRead
         );
 
         if (success && bytesRead == sizeof(currentValue)) {
-            // Successfully read the value, now compare it
-            // *** CORRECTION: Compare currentValue with newValue ***
+            if (verbose) {
+                std::cout << "[Refine] Addr: 0x" << std::hex << addr
+                          << " | Read: " << std::dec << currentValue
+                          << " | Target: " << newValue << std::endl;
+            }
+
             if (currentValue == newValue) {
-                refinedList.push_back(addr); // Keep this address
+                refinedList.push_back(addr);
                 keptCount++;
             }
         } else {
-            // ... (error handling for failed read) ...
-             if (verbose) {
-                 // ... logging ...
-             }
+            if (verbose) {
+                std::cerr << "[Refine] Failed to read 0x" << std::hex << addr
+                          << " | Error: " << GetLastError() << std::endl;
+            }
         }
     }
 
     CloseHandle(process_handle);
-    UNREGISTER_HANDLE(process_handle); // Unregister handle
+    UNREGISTER_HANDLE(process_handle);
 
     if (verbose) {
-        // ... (logging) ...
+        std::cout << "[Refine] Finished. Kept " << keptCount << " of " << candidates.size()
+                  << " addresses matching new value: " << newValue << std::endl;
     }
 
     return refinedList;

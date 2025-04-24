@@ -277,17 +277,14 @@ public:
     }
 };
 
-// Global error handler instance
 extern ErrorHandler errHandler;
 
-// Macro for easier error reporting with source file and line information
 #define LOG_INFO(msg) errHandler.info(msg, __FILE__ ":" + std::to_string(__LINE__))
 #define LOG_WARNING(msg) errHandler.warning(msg, __FILE__ ":" + std::to_string(__LINE__))
 #define LOG_ERROR(msg) errHandler.error(msg, __FILE__ ":" + std::to_string(__LINE__))
 #define LOG_FATAL(msg) errHandler.fatal(msg, __FILE__ ":" + std::to_string(__LINE__))
 
-// Macro for registering handles
 #define REGISTER_HANDLE(handle) errHandler.registerHandle(handle)
 #define UNREGISTER_HANDLE(handle) errHandler.unregisterHandle(handle)
 
-#endif // ERROR_HANDLER_H
+#endif 
